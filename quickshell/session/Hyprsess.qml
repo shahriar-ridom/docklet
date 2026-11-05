@@ -48,7 +48,7 @@ Singleton {
     function refresh() {
         Jobs.run([bin, "--json", "list"], (code, out) => {
             try { sessions = JSON.parse(out); } catch (e) {
-                if (code === 127) notify(`hyprsess not found at ${bin} — run ./install.sh`, true);
+                if (code === 127) notify(`hyprsess not found at ${bin} — re-run the Docklet installer`, true);
             }
             now = Date.now();
         });

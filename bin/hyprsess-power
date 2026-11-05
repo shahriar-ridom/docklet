@@ -4,10 +4,22 @@
 # Usage: hyprsess-power logout|poweroff|reboot|save-only
 set -u
 hyprsess save autosave || hyprctl notify 3 4000 0 "hyprsess: save failed, continuing"
+
+# systemd, then elogind/logind, then the plain command (runit, OpenRC, s6).
+power() {
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl "$1"
+  elif command -v loginctl >/dev/null 2>&1; then
+    loginctl "$1"
+  else
+    "$1"
+  fi
+}
+
 case "${1:-logout}" in
   logout)    hyprctl dispatch 'hl.dsp.exit()' ;;
-  poweroff)  systemctl poweroff ;;
-  reboot)    systemctl reboot ;;
+  poweroff)  power poweroff ;;
+  reboot)    power reboot ;;
   save-only) ;;
   *) echo "usage: $0 logout|poweroff|reboot|save-only" >&2; exit 1 ;;
 esac
