@@ -15,6 +15,11 @@ pub struct Config {
     pub fixup: bool,
     /// How long to keep polling for windows after the last launch, ms.
     pub fixup_timeout_ms: u64,
+    /// Launch apps one at a time, waiting for each one's window to appear.
+    /// Keeps the tiled (dwindle) order identical to the saved one.
+    pub wait_for_window: bool,
+    /// Max wait per app before moving on anyway, ms.
+    pub window_timeout_ms: u64,
     /// Classes treated as terminals (cwd taken from the shell child).
     pub terminals: Vec<String>,
     /// Extra ignore patterns (regex, case-insensitive, matched against the full class).
@@ -30,6 +35,8 @@ pub struct AppOverride {
     pub command: Option<String>,
     /// Delay after launching this app, ms (replaces launch_delay_ms).
     pub delay_ms: Option<u64>,
+    /// Max wait for this app's window, ms (replaces window_timeout_ms).
+    pub window_timeout_ms: Option<u64>,
     /// Never save this class.
     pub ignore: bool,
     /// Launch once per class even if windows had different PIDs.
@@ -39,9 +46,11 @@ pub struct AppOverride {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            launch_delay_ms: 400,
+            launch_delay_ms: 250,
             fixup: true,
             fixup_timeout_ms: 20_000,
+            wait_for_window: true,
+            window_timeout_ms: 10_000,
             terminals: ["kitty", "foot", "footclient", "alacritty", "org.wezfurlong.wezterm", "wezterm", "ghostty", "com.mitchellh.ghostty"]
                 .map(String::from)
                 .to_vec(),
@@ -107,6 +116,10 @@ impl Loaded {
 
     pub fn is_terminal(&self, class: &str) -> bool {
         self.cfg.terminals.iter().any(|t| t.eq_ignore_ascii_case(class))
+    }
+
+    pub fn window_timeout_for(&self, class: &str) -> u64 {
+        self.app(class).and_then(|a| a.window_timeout_ms).unwrap_or(self.cfg.window_timeout_ms)
     }
 
     pub fn delay_for(&self, class: &str) -> u64 {

@@ -1,7 +1,13 @@
 # ~/.config/hyprsess/config.toml — every key is optional.
 
-# Pause between app launches (ms). Raise it if apps fight over focus/placement.
-launch_delay_ms = 400
+# Launch apps one at a time and wait for each one's window before the next.
+# Keeps the tiled layout order the same as when you saved. If an app is slower
+# than window_timeout_ms, restore moves on and places it when it shows up.
+wait_for_window = true
+window_timeout_ms = 10000
+
+# Extra pause after each app's window appears (ms).
+launch_delay_ms = 250
 
 # After launching, poll `hyprctl clients` and correct workspace / float /
 # size / position for windows that ignored the exec rules.
@@ -23,7 +29,7 @@ ignore = [
 
 # [apps.zen]
 # command = "zen-browser"      # use the launcher instead of the raw binary
-# delay_ms = 2000              # browsers take a while; give them room
+# window_timeout_ms = 15000    # browsers can be slow to map their first window
 # single_instance = true       # launch once even if windows had different PIDs
 
 # [apps."com.anthropic.Claude"]

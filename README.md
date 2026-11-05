@@ -3,7 +3,7 @@
 Hyprland (0.56+, Lua config) session manager + Quickshell sidebar with a file shelf.
 
 - `hyprsess/`: Rust CLI that saves and restores window sessions
-- `quickshell/`: the sidebar (file shelf; session controls in stage 3)
+- `quickshell/`: the sidebar (file shelf + session controls)
 
 ## hyprsess
 
@@ -32,7 +32,7 @@ Add `--json` to any command for machine-readable output (the bar uses this).
 - Skipped: Quickshell, Noctalia, portals, polkit agents, fcitx, plus your `ignore` list.
 - An empty snapshot never overwrites an existing one (use `--allow-empty` to force it).
 
-**Restore.** For each app:
+**Restore.** Apps launch **one at a time**: restore waits for each app's first window to appear (`window_timeout_ms`, 10 s default), places it, then launches the next. Dwindle inserts windows in the order they appear, so this keeps the tiled layout matching the snapshot. For each app:
 ```lua
 hl.exec_cmd("cd <cwd> && exec <cmd>", { workspace = "3 silent", float = true, size = "900 600", move = "100 80" })
 ```
@@ -77,6 +77,8 @@ Quickshell hot-reloads on save. Edit `quickshell/Theme.qml` to restyle (colors, 
 | `Jobs.qml` / `Job.qml` | Run external commands with a callback |
 | `shelf/ShelfStore.qml` | Shelf state and persistence (`~/.local/share/sessionbar/shelf.json`) |
 | `shelf/Shelf.qml`, `shelf/ShelfItem.qml` | Shelf UI, drop zones, drag-out |
+| `session/Hyprsess.qml` | Runs `hyprsess --json …`, holds the session list |
+| `session/SessionPanel.qml` | Save button + name prompt, session list, restore/delete |
 
 **Behavior**
 - Hidden as a 3 px hover strip on the right edge. Hovering slides the bar in at 64 px; staying on it widens it to 280 px. Dragging files over the edge reveals it right away.
@@ -84,3 +86,9 @@ Quickshell hot-reloads on save. Edit `quickshell/Theme.qml` to restyle (colors, 
 - **Drag out**: drag any item into a file manager, browser upload field, Discord, Telegram and so on (sent as `text/uri-list`). Click items to select several, then drag one of the selected items to carry them all.
 - Double-click opens. Right-click gives Open / Show in folder / Remove / Clear all. "Show in folder" uses the `org.freedesktop.FileManager1` D-Bus API (Thunar highlights the file).
 - Missing originals (reference mode) are struck through in red; this is re-checked every time the bar opens. Removing a *copied* item also deletes its cached copy.
+
+**Sessions section** (bottom of the bar)
+- 💾 opens a name prompt. The bar takes the keyboard only while the prompt is open. Enter saves, Esc cancels, an empty name saves to `last`, and an existing name shows "will overwrite".
+- Hover a session for ▶ restore and 🗑 delete (click twice to confirm). Apps that are already open are skipped, as with the CLI.
+- Results and errors show as a toast. The list refreshes every time the bar opens, so timer autosaves appear too.
+- Calls `~/.local/bin/hyprsess` by absolute path. If it's missing, the toast tells you to run `./install.sh`.

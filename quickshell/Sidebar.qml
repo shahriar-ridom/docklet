@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Wayland
 import qs
 import qs.shelf
+import qs.session
 
 // Right-edge auto-hiding sidebar, one per screen.
 PanelWindow {
@@ -22,7 +23,9 @@ PanelWindow {
 
     WlrLayershell.namespace: "sessionbar"   // for Hyprland layer rules (blur)
     WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    // Keyboard only while typing a session name; otherwise never steal focus.
+    // Exclusive = typing works immediately, no extra click into the field.
+    WlrLayershell.keyboardFocus: sessions.prompting ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     // Input region: a thin strip at the edge while hidden, the whole panel while shown.
     mask: Region { item: hitArea }
@@ -46,10 +49,21 @@ PanelWindow {
         }
     }
     onDragIncomingChanged: if (dragIncoming) { shown = true; expanded = true; }
-    onShownChanged: if (shown) ShelfStore.refreshMissing()
+    onShownChanged: if (shown) { ShelfStore.refreshMissing(); Hyprsess.refresh(); }
 
     Timer { id: revealTimer; interval: Theme.revealDelay; onTriggered: if (win.wantShown) win.shown = true }
-    Timer { id: hideTimer; interval: Theme.hideDelay; onTriggered: if (!win.pinned) { win.shown = false; win.expanded = false; } }
+    Timer {
+        id: hideTimer
+        // Longer grace while the name prompt is open, so a stray pointer move
+        // doesn't throw away what you're typing.
+        interval: sessions.prompting ? 4000 : Theme.hideDelay
+        onTriggered: {
+            if (win.pinned) return;
+            sessions.closePrompt();   // also releases the keyboard grab
+            win.shown = false;
+            win.expanded = false;
+        }
+    }
     Timer {
         // Widen after hovering the revealed bar for a moment.
         interval: Theme.expandDelay
@@ -117,7 +131,19 @@ PanelWindow {
                     dragIncoming: win.dragIncoming
                 }
 
-                // Stage 3: SessionPanel goes here.
+                Rectangle {   // divider
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: Theme.border
+                }
+
+                SessionPanel {
+                    id: sessions
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    maxHeight: panel.height * 0.45
+                    expanded: win.expanded
+                }
             }
 
             Toast {
@@ -129,6 +155,10 @@ PanelWindow {
 
     Connections {
         target: ShelfStore
+        function onNotify(message, isError) { toast.show(message, isError); }
+    }
+    Connections {
+        target: Hyprsess
         function onNotify(message, isError) { toast.show(message, isError); }
     }
 }

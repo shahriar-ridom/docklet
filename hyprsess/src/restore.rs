@@ -62,8 +62,13 @@ fn same_class(a: &str, c: &Client) -> bool {
 pub fn run(cfg: &Loaded, session: &Session, opts: &Opts) -> Result<Report> {
     let mut rep = Report::default();
     let before = hypr::clients()?;
-    let known: HashSet<String> = before.iter().map(|c| c.address.clone()).collect();
-    let mut pending: Vec<Window> = Vec::new();
+    let monitors = hypr::monitors().unwrap_or_default();
+    // Addresses already matched (or pre-existing); never matched again.
+    let mut claimed: HashSet<String> = before.iter().map(|c| c.address.clone()).collect();
+    // Saved windows still waiting for a live window to appear, with a unique id.
+    let mut pending: Vec<(usize, Window)> = Vec::new();
+    let mut next_id = 0usize;
+    let fixup = cfg.cfg.fixup && !opts.no_fixup;
 
     for app in &session.apps {
         // Avoid duplicating apps that are already open (terminals are exempt:
@@ -83,58 +88,87 @@ pub fn run(cfg: &Loaded, session: &Session, opts: &Opts) -> Result<Report> {
         if opts.dry_run || opts.verbose {
             eprintln!("[{}] {}", app.class, lua);
         }
-        if !opts.dry_run {
-            match hypr::eval(&lua) {
-                Ok(()) => {
-                    rep.launched.push(app.class.clone());
-                    pending.extend(app.windows.iter().cloned());
-                }
-                Err(e) => rep.errors.push(format!("{}: {e:#}", app.class)),
-            }
-            sleep(Duration::from_millis(cfg.delay_for(&app.class)));
-        } else {
+        if opts.dry_run {
             rep.launched.push(app.class.clone());
-        }
-    }
-
-    if opts.dry_run || opts.no_fixup || !cfg.cfg.fixup || pending.is_empty() {
-        return Ok(rep);
-    }
-
-    // Fix-up: match new windows (addresses we hadn't seen) to saved windows by
-    // class, preferring an exact title match, then correct their placement.
-    let monitors = hypr::monitors().unwrap_or_default();
-    let mut claimed: HashSet<String> = known;
-    let deadline = Instant::now() + Duration::from_millis(cfg.cfg.fixup_timeout_ms);
-    while !pending.is_empty() && Instant::now() < deadline {
-        sleep(Duration::from_millis(400));
-        let Ok(now) = hypr::clients() else { continue };
-        let fresh: Vec<&Client> = now.iter().filter(|c| c.mapped && !claimed.contains(&c.address)).collect();
-        if fresh.is_empty() {
             continue;
         }
-        let mut still = Vec::new();
-        for w in pending.drain(..) {
-            let cands: Vec<&&Client> = fresh.iter().filter(|c| same_class(&w.class, c) && !claimed.contains(&c.address)).collect();
-            let pick = cands.iter().find(|c| c.title == w.title).or_else(|| cands.first()).copied();
-            match pick {
-                Some(c) => {
-                    claimed.insert(c.address.clone());
-                    // Give the app a moment to finish its own initial resize.
-                    sleep(Duration::from_millis(150));
-                    match fix(c, &w, &monitors, opts.verbose) {
-                        Ok(true) => rep.fixed += 1,
-                        Ok(false) => {}
-                        Err(e) => rep.errors.push(format!("fixup {}: {e:#}", w.class)),
-                    }
+        if let Err(e) = hypr::eval(&lua) {
+            rep.errors.push(format!("{}: {e:#}", app.class));
+            continue;
+        }
+        rep.launched.push(app.class.clone());
+        let first_id = next_id;
+        for w in &app.windows {
+            pending.push((next_id, w.clone()));
+            next_id += 1;
+        }
+
+        // Wait for this app's first window before launching the next one.
+        // Dwindle inserts windows in map order, so launching in parallel
+        // shuffles the tiled layout; sequential launches keep the saved order.
+        if cfg.cfg.wait_for_window {
+            let deadline = Instant::now() + Duration::from_millis(cfg.window_timeout_for(&app.class));
+            while Instant::now() < deadline {
+                sleep(Duration::from_millis(150));
+                place_new(&mut pending, &mut claimed, &monitors, fixup, opts.verbose, &mut rep);
+                if !pending.iter().any(|(id, _)| *id == first_id) {
+                    break;
                 }
-                None => still.push(w),
             }
         }
-        pending = still;
+        sleep(Duration::from_millis(cfg.delay_for(&app.class)));
+    }
+
+    // Final pass: windows from multi-window apps (browsers restoring their own
+    // windows) and anything slower than its wait timeout.
+    if !opts.dry_run {
+        let deadline = Instant::now() + Duration::from_millis(cfg.cfg.fixup_timeout_ms);
+        while !pending.is_empty() && Instant::now() < deadline {
+            sleep(Duration::from_millis(400));
+            place_new(&mut pending, &mut claimed, &monitors, fixup, opts.verbose, &mut rep);
+        }
     }
     rep.unplaced = pending.len();
     Ok(rep)
+}
+
+/// Match newly mapped windows to pending saved windows (same class, exact
+/// title preferred) and fix their placement. Matched windows leave `pending`.
+fn place_new(
+    pending: &mut Vec<(usize, Window)>,
+    claimed: &mut HashSet<String>,
+    monitors: &[hypr::Monitor],
+    fixup: bool,
+    verbose: bool,
+    rep: &mut Report,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let Ok(now) = hypr::clients() else { return };
+    let fresh: Vec<&Client> = now.iter().filter(|c| c.mapped && !claimed.contains(&c.address)).collect();
+    if fresh.is_empty() {
+        return;
+    }
+    let mut still = Vec::new();
+    for (id, w) in pending.drain(..) {
+        let cands: Vec<&&Client> = fresh.iter().filter(|c| same_class(&w.class, c) && !claimed.contains(&c.address)).collect();
+        let Some(c) = cands.iter().find(|c| c.title == w.title).or_else(|| cands.first()).copied() else {
+            still.push((id, w));
+            continue;
+        };
+        claimed.insert(c.address.clone());
+        if fixup {
+            // Give the app a moment to finish its own initial resize.
+            sleep(Duration::from_millis(100));
+            match fix(c, &w, monitors, verbose) {
+                Ok(true) => rep.fixed += 1,
+                Ok(false) => {}
+                Err(e) => rep.errors.push(format!("fixup {}: {e:#}", w.class)),
+            }
+        }
+    }
+    *pending = still;
 }
 
 /// Returns Ok(true) if any correction was dispatched.
