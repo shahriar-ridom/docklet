@@ -18,3 +18,18 @@ hl.bind(Mod .. " + SHIFT + Escape", hl.dsp.exec_cmd("hyprsess-power logout"))
 -- AFTER noctalia. The sleep lets the shell/portals come up first.
 --
 -- hl.exec_cmd("sleep 3 && hyprsess restore autosave")
+
+-- =============================================================================
+-- Sidebar (Quickshell)
+-- =============================================================================
+
+-- --- startup.lua: launch the sidebar (inside hl.on("hyprland.start", ...)) ----
+-- hl.exec_cmd("qs -c sessionbar")
+
+-- --- rules.lua: blur behind the translucent panel -----------------------------
+hl.layer_rule({
+	name = "sessionbar",
+	match = { namespace = "^sessionbar$" },
+	blur = true,
+	ignore_alpha = 0.2,   -- don't blur the fully transparent parts of the surface
+})

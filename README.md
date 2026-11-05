@@ -3,7 +3,7 @@
 Hyprland (0.56+, Lua config) session manager + Quickshell sidebar with a file shelf.
 
 - `hyprsess/`: Rust CLI that saves and restores window sessions
-- `quickshell/`: the sidebar (stage 2/3, not built yet)
+- `quickshell/`: the sidebar (file shelf; session controls in stage 3)
 
 ## hyprsess
 
@@ -59,3 +59,28 @@ hyprsess restarts **programs**; it can't restore what's inside them:
 - Terminals reopen in the right directory, but scrollback and running processes (`npm run dev`, ssh, nvim buffers) are gone. Use **tmux** with [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) + [tmux-continuum](https://github.com/tmux-plugins/tmux-continuum) for that, and make the terminal's command `kitty -e tmux new -A -s main` via a config override.
 - Tiled layout is approximate: windows land on the right workspace, but the dwindle split arrangement depends on launch order.
 - Apps that fork through a launcher may escape the exec rules. The fix-up step catches these as long as the class matches.
+
+## Sidebar (Quickshell)
+
+```sh
+ln -sfn "$PWD/quickshell" ~/.config/quickshell/sessionbar
+qs -c sessionbar                  # foreground with logs; Ctrl+C to quit
+SESSIONBAR_PIN=1 qs -c sessionbar # keep it open and wide while restyling
+```
+Quickshell hot-reloads on save. Edit `quickshell/Theme.qml` to restyle (colors, sizes, timings).
+
+| File | Role |
+|---|---|
+| `shell.qml` | Root: one `Sidebar` per screen |
+| `Sidebar.qml` | Layer-shell `PanelWindow`, auto-hide and expand logic, input mask |
+| `Theme.qml` | Every color, size and timing |
+| `Jobs.qml` / `Job.qml` | Run external commands with a callback |
+| `shelf/ShelfStore.qml` | Shelf state and persistence (`~/.local/share/sessionbar/shelf.json`) |
+| `shelf/Shelf.qml`, `shelf/ShelfItem.qml` | Shelf UI, drop zones, drag-out |
+
+**Behavior**
+- Hidden as a 3 px hover strip on the right edge. Hovering slides the bar in at 64 px; staying on it widens it to 280 px. Dragging files over the edge reveals it right away.
+- **Drop in**: two zones appear. *Keep link* stores a reference to the original; *Copy to shelf* copies into `~/.cache/shelf/<id>/`. Dropping anywhere else on the bar counts as *Keep link*. Why not a modifier key: a layer-shell bar has no keyboard focus during a drag, and QML drop events don't expose modifiers.
+- **Drag out**: drag any item into a file manager, browser upload field, Discord, Telegram and so on (sent as `text/uri-list`). Click items to select several, then drag one of the selected items to carry them all.
+- Double-click opens. Right-click gives Open / Show in folder / Remove / Clear all. "Show in folder" uses the `org.freedesktop.FileManager1` D-Bus API (Thunar highlights the file).
+- Missing originals (reference mode) are struck through in red; this is re-checked every time the bar opens. Removing a *copied* item also deletes its cached copy.
