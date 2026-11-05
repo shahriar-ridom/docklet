@@ -92,6 +92,16 @@ pub fn clients() -> Result<Vec<Client>> {
     serde_json::from_str(&s).context("parsing hyprctl clients -j")
 }
 
+pub fn active_workspace() -> Result<WsRef> {
+    let s = hyprctl(&["-j", "activeworkspace"])?;
+    serde_json::from_str(&s).context("parsing hyprctl activeworkspace -j")
+}
+
+pub fn workspaces() -> Result<Vec<WsRef>> {
+    let s = hyprctl(&["-j", "workspaces"])?;
+    serde_json::from_str(&s).context("parsing hyprctl workspaces -j")
+}
+
 pub fn monitors() -> Result<Vec<Monitor>> {
     let s = hyprctl(&["-j", "monitors"])?;
     serde_json::from_str(&s).context("parsing hyprctl monitors -j")
@@ -99,8 +109,7 @@ pub fn monitors() -> Result<Vec<Monitor>> {
 
 pub fn version() -> String {
     hyprctl(&["version"])
-        .ok()
-        .and_then(|s| Some(s.split_whitespace().take(2).collect::<Vec<_>>().join(" ")))
+        .ok().map(|s| s.split_whitespace().take(2).collect::<Vec<_>>().join(" "))
         .unwrap_or_default()
 }
 
@@ -134,4 +143,17 @@ pub fn lua_str(s: &str) -> String {
 pub fn lua_table(pairs: &[(&str, String)]) -> String {
     let body: Vec<String> = pairs.iter().map(|(k, v)| format!("{k} = {v}")).collect();
     format!("{{ {} }}", body.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lua_strings() {
+        assert_eq!(lua_str(r#"cd "/a b" && x"#), r#""cd \"/a b\" && x""#);
+        assert_eq!(lua_str("a\\b\nc"), r#""a\\b\nc""#);
+        assert_eq!(lua_table(&[("float", "true".into()), ("workspace", lua_str("2 silent"))]),
+                   r#"{ float = true, workspace = "2 silent" }"#);
+    }
 }

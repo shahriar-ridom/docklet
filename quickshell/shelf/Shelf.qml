@@ -9,31 +9,35 @@ Item {
 
     property bool expanded: true
     property bool dragIncoming: false            // set by Sidebar while a drag hovers the bar
-    readonly property bool dropHover: linkZone.containsDrag || copyZone.containsDrag
+    property int _zonesHovered: 0
+    readonly property bool dropHover: _zonesHovered > 0
+    // Zones for whatever is being dragged in (set by Sidebar's edge DropArea).
+    readonly property var zones: ShelfStore.zonesFor(ShelfStore.incoming)
     readonly property bool menuOpen: menu.visible
 
     // ---- header ------------------------------------------------------------
     RowLayout {
-        id: header
+        id: headerRow
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 28
+        height: 26
         spacing: 2
 
         Text {
-            Layout.leftMargin: shelf.expanded ? 4 : 0
+            Layout.leftMargin: shelf.expanded ? 6 : 0
             Layout.fillWidth: !shelf.expanded
             horizontalAlignment: Text.AlignHCenter
-            text: shelf.expanded ? "Shelf" : ""   // nf-fa-archive
-            color: Theme.textDim
-            font.family: shelf.expanded ? Theme.font : Theme.iconFont
-            font.pixelSize: shelf.expanded ? Theme.fontSize : Theme.iconSize
+            text: shelf.expanded ? "Shelf" : "\uf187"   // nf-fa-archive
+            color: shelf.expanded ? Theme.text : Theme.textDim
+            font.family: shelf.expanded ? Theme.fontDisplay : Theme.iconFont
+            font.pixelSize: shelf.expanded ? Theme.fontSizeTitle : Theme.iconSize
             font.weight: Font.DemiBold
         }
         Text {
+            Layout.leftMargin: 4
             visible: shelf.expanded && ShelfStore.items.length > 0
-            text: ShelfStore.selectedCount ? `${ShelfStore.selectedCount}/${ShelfStore.items.length}` : ShelfStore.items.length
-            color: Theme.textDim
-            font.family: Theme.font; font.pixelSize: Theme.fontSizeSmall
+            text: ShelfStore.selectedCount ? `${ShelfStore.selectedCount} of ${ShelfStore.items.length} selected` : ShelfStore.items.length
+            color: ShelfStore.selectedCount ? Theme.accent : Theme.textFaint
+            font.family: Theme.font; font.pixelSize: Theme.fontSizeSmall + 1
         }
         Item { Layout.fillWidth: true; visible: shelf.expanded }
 
@@ -68,10 +72,13 @@ Item {
     // ---- list --------------------------------------------------------------
     ListView {
         id: list
-        anchors { top: header.bottom; topMargin: Theme.spacing; left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { top: headerRow.bottom; topMargin: 6; left: parent.left; right: parent.right; bottom: parent.bottom }
         clip: true
         spacing: Theme.spacing
         model: ShelfStore.items
+        // Step aside while something is being dragged in, so the zones read cleanly.
+        opacity: shelf.dragIncoming || shelf.dropHover ? 0 : 1
+        Behavior on opacity { NumberAnimation { duration: Theme.fastMs } }
         boundsBehavior: Flickable.StopAtBounds
         // Flicking would steal the gesture from the item DragHandlers.
         interactive: false
@@ -87,49 +94,59 @@ Item {
         }
     }
 
-    // Empty state.
+    // Empty state: says what the shelf is for, in one line.
     Column {
         anchors.centerIn: list
         visible: ShelfStore.ready && ShelfStore.items.length === 0 && !shelf.dragIncoming
-        spacing: 6
+        spacing: 8
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: ""   // cloud-download-ish
-            font.family: Theme.iconFont; font.pixelSize: 22
-            color: Theme.textDim
+            text: "\uf01c"   // inbox
+            font.family: Theme.iconFont; font.pixelSize: 20
+            color: Theme.textFaint
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: shelf.expanded
             text: "Drop files here"
-            font.family: Theme.font; font.pixelSize: Theme.fontSize
+            font.family: Theme.font; font.pixelSize: Theme.fontSize; font.weight: Font.Medium
             color: Theme.textDim
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: shelf.expanded
+            width: 180
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: "Park them for a moment, then drag them into any app."
+            font.family: Theme.font; font.pixelSize: Theme.fontSizeSmall + 1
+            lineHeight: 1.2
+            color: Theme.textFaint
         }
     }
 
     // ---- drop zones (shown while a drag hovers the bar) ---------------------
-    // Two zones instead of a modifier key: a layer-shell bar has no keyboard
-    // focus during DnD, so it can't see Ctrl/Shift reliably.
+    // Zones instead of a modifier key: a layer-shell bar has no keyboard focus
+    // during DnD, so it can't see Ctrl/Shift reliably. Which zones appear
+    // depends on what's dragged (ShelfStore.zonesFor).
     ColumnLayout {
         anchors.fill: list
         spacing: Theme.spacing
         visible: shelf.dragIncoming || shelf.dropHover
         opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.fastMs } }
 
-        DropZone {
-            id: linkZone
-            Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredHeight: 3
-            glyph: ""; label: "Keep link"; hint: "reference the original"
-            expanded: shelf.expanded
-            onDroppedUrls: urls => ShelfStore.addUrls(urls, false)
-        }
-        DropZone {
-            id: copyZone
-            Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredHeight: 2
-            glyph: ""; label: "Copy to shelf"; hint: "~/.cache/shelf"
-            expanded: shelf.expanded
-            onDroppedUrls: urls => ShelfStore.addUrls(urls, true)
+        Repeater {
+            model: shelf.zones
+            delegate: DropZone {
+                required property var modelData
+                Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredHeight: modelData.weight
+                glyph: modelData.glyph; label: modelData.label; hint: modelData.hint
+                role: modelData.role
+                expanded: shelf.expanded
+                onContainsDragChanged: shelf._zonesHovered += containsDrag ? 1 : -1
+                Component.onDestruction: if (containsDrag) shelf._zonesHovered -= 1
+            }
         }
     }
 
@@ -146,12 +163,16 @@ Item {
         id: menu
         property var target: null
         visible: false
-        width: Math.min(170, shelf.width - 8)
-        height: menuCol.implicitHeight + 8
-        radius: Theme.itemRadius
-        color: "#1b1c1f"
+        width: Math.min(176, shelf.width - 8)
+        height: menuCol.implicitHeight + 10
+        radius: Theme.itemRadius + 2
+        color: "#1a1d23"
         border.color: Theme.border
         z: 10
+        // Pops from where you clicked.
+        scale: visible ? 1 : 0.96
+        transformOrigin: Item.TopLeft
+        Behavior on scale { NumberAnimation { duration: Theme.fastMs; easing.type: Theme.ease } }
 
         function openFor(it, pos) {
             target = it;
@@ -162,11 +183,24 @@ Item {
 
         Column {
             id: menuCol
-            anchors { fill: parent; margins: 4 }
-            MenuEntry { glyph: ""; label: "Open"; enabled: !!menu.target && !menu.target.missing
+            anchors { fill: parent; margins: 5 }
+            MenuEntry { readonly property bool isLink: !!menu.target && menu.target.kind === "link"
+                        glyph: "\uf35d"; label: isLink ? "Open in browser" : "Open"
+                        enabled: !!menu.target && !menu.target.missing && !menu.target.pending
                         onTriggered: ShelfStore.open(menu.target) }
-            MenuEntry { glyph: ""; label: "Show in folder"; enabled: !!menu.target && !menu.target.missing
+            MenuEntry { glyph: "\uf07c"; label: "Show in folder"
+                        visible: !!menu.target && menu.target.kind !== "link"
+                        enabled: !!menu.target && !menu.target.missing && !menu.target.pending
                         onTriggered: ShelfStore.showInFolder(menu.target) }
+            MenuEntry { readonly property bool isLink: !!menu.target && menu.target.kind === "link"
+                        glyph: "\uf0c5"; label: isLink ? "Copy link" : "Copy path"
+                        enabled: !!menu.target && !menu.target.pending
+                        onTriggered: ShelfStore.copyLink(menu.target) }
+            MenuEntry { glyph: "\uf019"; label: "Download video or file"
+                        visible: !!menu.target && menu.target.kind === "link"
+                        onTriggered: ShelfStore.download(menu.target.url, menu.target.name) }
+            Rectangle { width: parent.width; height: 9; color: "transparent"
+                        Rectangle { anchors.centerIn: parent; width: parent.width - 16; height: 1; color: Theme.border } }
             MenuEntry { glyph: ""; label: "Remove"; danger: true
                         onTriggered: ShelfStore.remove([menu.target.id]) }
             MenuEntry { glyph: ""; label: "Clear all"; danger: true
@@ -183,12 +217,12 @@ Item {
         signal triggered
         width: parent.width
         height: 28
-        radius: 6
+        radius: 8
         opacity: enabled ? 1 : 0.4
-        color: ma.containsMouse ? Theme.surfaceHover : "transparent"
+        color: ma.containsMouse ? (entry.danger ? Theme.dangerSoft : Theme.surfaceHover) : "transparent"
         Row {
-            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
-            spacing: 8
+            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 9 }
+            spacing: 9
             Text { text: entry.glyph; font.family: Theme.iconFont; font.pixelSize: 12
                    color: entry.danger ? Theme.danger : Theme.textDim; width: 14 }
             Text { text: entry.label; font.family: Theme.font; font.pixelSize: Theme.fontSize
@@ -208,33 +242,43 @@ Item {
         property string label
         property string hint
         property bool expanded
-        signal droppedUrls(var urls)
+        property string role
 
-        onEntered: drag => drag.accepted = drag.hasUrls
+        onEntered: drag => drag.accepted = ShelfStore.acceptsDrag(drag)
         onDropped: drop => {
-            if (!drop.hasUrls) return;
-            drop.acceptProposedAction();
-            zone.droppedUrls(drop.urls);
+            if (!ShelfStore.acceptsDrag(drop)) return;
+            drop.accept(Qt.CopyAction);
+            ShelfStore.handleDrop(drop, zone.role);
         }
 
         Rectangle {
             anchors.fill: parent
-            radius: Theme.itemRadius
-            color: zone.containsDrag ? Theme.accentStrong : Theme.accentSoft
+            radius: Theme.itemRadius + 4
+            color: "#12151a"
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.itemRadius + 4
+            color: zone.containsDrag ? Theme.accentStrong : Qt.rgba(0.70, 0.78, 0.90, 0.06)
             border.width: 1
-            border.color: zone.containsDrag ? Theme.accent : Theme.border
-            Behavior on color { ColorAnimation { duration: 100 } }
+            border.color: zone.containsDrag ? Theme.accent : Qt.rgba(0.70, 0.78, 0.90, 0.22)
+            Behavior on color { ColorAnimation { duration: Theme.fastMs } }
+            Behavior on border.color { ColorAnimation { duration: Theme.fastMs } }
 
             Column {
                 anchors.centerIn: parent
-                spacing: 4
+                width: parent.width - 24
+                spacing: 5
+                scale: zone.containsDrag ? 1.04 : 1
+                Behavior on scale { NumberAnimation { duration: Theme.fastMs; easing.type: Theme.ease } }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: zone.glyph
                        font.family: Theme.iconFont; font.pixelSize: 20; color: Theme.accent }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; visible: zone.expanded
                        text: zone.label; font.family: Theme.font; font.pixelSize: Theme.fontSize
                        font.weight: Font.DemiBold; color: Theme.text }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; visible: zone.expanded
-                       text: zone.hint; font.family: Theme.font; font.pixelSize: Theme.fontSizeSmall
+                Text { width: parent.width; visible: zone.expanded; horizontalAlignment: Text.AlignHCenter
+                       wrapMode: Text.Wrap
+                       text: zone.hint; font.family: Theme.font; font.pixelSize: Theme.fontSizeSmall + 1
                        color: Theme.textDim }
             }
         }

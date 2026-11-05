@@ -17,6 +17,12 @@ fixup_timeout_ms = 20000
 # Classes treated as terminals: the saved cwd is the shell's, not the terminal's.
 # terminals = ["kitty", "foot", "footclient", "alacritty", "org.wezfurlong.wezterm", "ghostty"]
 
+# Save the program running inside a terminal (claude, nvim, btop…) and run it
+# again inside the terminal on restore. Claude Code resumes the same conversation.
+terminal_programs = true
+# Programs never relaunched (regex, full match). sudo/doas/su/pkexec are built in.
+# terminal_programs_ignore = ["ssh", "less"]
+
 # Extra classes never to save (regex, case-insensitive, full match).
 # Built in already: quickshell, noctalia*, portals, polkit agents, fcitx.
 ignore = [
@@ -51,6 +57,11 @@ ignore = [
 # [apps.steam]
 # command = "steam -silent"
 # delay_ms = 5000
+
+# Terminal that takes its command after a flag (built in: kitty/foot none,
+# wezterm "start --", everything else "-e"):
+# [apps."com.example.term"]
+# exec_args = "--command"
 
 # Never save this one:
 # [apps.thunar]

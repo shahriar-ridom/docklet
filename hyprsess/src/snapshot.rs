@@ -17,7 +17,16 @@ pub struct Session {
     /// Unix seconds.
     pub created: i64,
     pub hyprland: String,
+    /// Workspace name this session was limited to; None = all desktops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub apps: Vec<App>,
+}
+
+/// Which windows `capture` takes.
+pub enum Scope {
+    All,
+    Workspace(hypr::WsRef),
 }
 
 /// One launch = one App. Windows sharing a PID (browsers, Electron) are grouped
@@ -31,7 +40,24 @@ pub struct App {
     pub source: String,
     pub cwd: Option<String>,
     pub terminal: bool,
+    /// Executable name of the window's process at save time (e.g. "thunar",
+    /// "Discord"), used on restore to spot the app running in the background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<String>,
+    /// Terminals only: the program that was running inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner: Option<Inner>,
     pub windows: Vec<Window>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Inner {
+    /// Program name, for display (e.g. "claude", "nvim").
+    pub name: String,
+    /// Shell command run inside the terminal.
+    pub command: String,
+    /// The terminal's shell, re-entered when the program exits.
+    pub shell: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -115,10 +141,48 @@ fn resolve_command(cfg: &Loaded, class: &str, pid: i32) -> Option<(String, &'sta
         }
     }
     let argv = procinfo::cmdline(pid)?;
+    // Windows owned by a background service (thunar --daemon, GApplication
+    // services): rerunning that cmdline opens no window, so use the launcher.
+    if argv.iter().skip(1).any(|a| a == "--daemon" || a == "--gapplication-service")
+        && let Some(exec) = desktop::exec_for_class(class) {
+            return Some((exec, "desktop"));
+        }
     Some((argv.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" "), "cmdline"))
 }
 
-pub fn capture(cfg: &Loaded, name: &str) -> Result<(Session, Vec<String>)> {
+/// Claude Code writes `<config>/sessions/<pid>.json` with its conversation id,
+/// so a running `claude` can be brought back with `claude --resume <id>`.
+fn claude_resume(pid: i32) -> Option<String> {
+    let dir = procinfo::environ_var(pid, "CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude"));
+    let text = std::fs::read_to_string(dir.join(format!("sessions/{pid}.json"))).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if v.get("pid").and_then(|p| p.as_i64()) != Some(pid as i64) {
+        return None;
+    }
+    let id = v.get("sessionId")?.as_str()?;
+    Some(format!("claude --resume {}", shell_quote(id)))
+}
+
+/// What's running in the foreground of a terminal's shell, if anything.
+fn terminal_inner(cfg: &Loaded, term_pid: i32) -> Option<(Inner, Option<PathBuf>)> {
+    let shell = procinfo::shell_child(term_pid)?;
+    let fg = procinfo::foreground_of(shell)?;
+    let shell_path = procinfo::exe(shell)?.to_string_lossy().into_owned();
+    let argv = procinfo::cmdline(fg)?;
+    let name = std::path::Path::new(&argv[0]).file_name()?.to_string_lossy().into_owned();
+    let (name, command) = match claude_resume(fg) {
+        Some(cmd) => ("claude".to_string(), cmd),
+        None => (name, argv.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")),
+    };
+    if cfg.is_program_ignored(&name) {
+        return None;
+    }
+    Some((Inner { name, command, shell: shell_path }, procinfo::cwd(fg)))
+}
+
+pub fn capture(cfg: &Loaded, name: &str, scope: &Scope) -> Result<(Session, Vec<String>)> {
     let monitors = hypr::monitors()?;
     let mut clients: Vec<Client> = hypr::clients()?;
     let mut warnings = Vec::new();
@@ -136,6 +200,10 @@ pub fn capture(cfg: &Loaded, name: &str) -> Result<(Session, Vec<String>)> {
         if !c.mapped || c.pid <= 0 || c.pid == self_pid || cfg.is_ignored(&class) {
             continue;
         }
+        if let Scope::Workspace(ws) = scope
+            && (c.workspace.id != ws.id || c.workspace.name != ws.name) {
+                continue;
+            }
         let mon = monitors.iter().find(|m| m.id == c.monitor);
         let (mx, my) = mon.map(|m| (m.x, m.y)).unwrap_or((0, 0));
         let win = Window {
@@ -165,7 +233,13 @@ pub fn capture(cfg: &Loaded, name: &str) -> Result<(Session, Vec<String>)> {
             continue;
         };
         let terminal = cfg.is_terminal(&class);
-        let cwd = if terminal { procinfo::shell_child_cwd(c.pid).or_else(|| procinfo::cwd(c.pid)) } else { procinfo::cwd(c.pid) };
+        let mut cwd = if terminal { procinfo::shell_child_cwd(c.pid).or_else(|| procinfo::cwd(c.pid)) } else { procinfo::cwd(c.pid) };
+        let mut inner = None;
+        if terminal && cfg.cfg.terminal_programs
+            && let Some((i, icwd)) = terminal_inner(cfg, c.pid) {
+                inner = Some(i);
+                cwd = icwd.or(cwd);
+            }
 
         order.push(key.clone());
         groups.insert(
@@ -174,19 +248,32 @@ pub fn capture(cfg: &Loaded, name: &str) -> Result<(Session, Vec<String>)> {
                 class,
                 command,
                 source: source.into(),
+                process: procinfo::exe_name(c.pid),
                 cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
                 terminal,
+                inner,
                 windows: vec![win],
             },
         );
     }
 
-    let apps = order.into_iter().filter_map(|k| groups.remove(&k)).collect();
+    let mut apps: Vec<App> = order.into_iter().filter_map(|k| groups.remove(&k)).collect();
+    for a in &mut apps {
+        // A single-instance terminal (one PID, many windows): we can't tell
+        // which window the program ran in, so don't guess.
+        if a.windows.len() > 1 && a.inner.take().is_some() {
+            warnings.push(format!("{}: several windows share one process; not saving the programs inside them", a.class));
+        }
+    }
     let session = Session {
         version: FORMAT_VERSION,
         name: name.into(),
         created: chrono::Utc::now().timestamp(),
         hyprland: hypr::version(),
+        scope: match scope {
+            Scope::All => None,
+            Scope::Workspace(ws) => Some(ws.name.clone()),
+        },
         apps,
     };
     Ok((session, warnings))
@@ -214,11 +301,10 @@ pub fn list() -> Result<Vec<Session>> {
     let Ok(rd) = std::fs::read_dir(data_dir()) else { return Ok(out) };
     for e in rd.flatten() {
         let p = e.path();
-        if p.extension().is_some_and(|x| x == "json") {
-            if let Ok(s) = std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| Ok(serde_json::from_str::<Session>(&t)?)) {
+        if p.extension().is_some_and(|x| x == "json")
+            && let Ok(s) = std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| Ok(serde_json::from_str::<Session>(&t)?)) {
                 out.push(s);
             }
-        }
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.created));
     Ok(out)
@@ -227,4 +313,46 @@ pub fn list() -> Result<Vec<Session>> {
 pub fn delete(name: &str) -> Result<()> {
     let path = path_for(name)?;
     std::fs::remove_file(&path).with_context(|| format!("no session '{name}'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quoting() {
+        assert_eq!(shell_quote("kitty"), "kitty");
+        assert_eq!(shell_quote("/opt/a b"), "'/opt/a b'");
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn names() {
+        assert!(validate_name("desktop-1").is_ok());
+        assert!(validate_name("work.v2").is_ok());
+        for bad in ["", ".hidden", "a/b", "../x", "with space", &"x".repeat(65)] {
+            assert!(validate_name(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn workspace_selectors() {
+        let w = |id: i64, name: &str| Window {
+            class: String::new(), title: String::new(), workspace_id: id, workspace_name: name.into(),
+            monitor: String::new(), at: [0, 0], size: [0, 0], floating: false, fullscreen: 0, pinned: false, pid: 0,
+        };
+        assert_eq!(w(3, "3").workspace_selector(), "3");
+        assert_eq!(w(-98, "special:scratchpad").workspace_selector(), "special:scratchpad");
+        assert_eq!(w(7, "code").workspace_selector(), "name:code");
+    }
+
+    #[test]
+    fn old_session_files_still_parse() {
+        // Format before scope/inner/process existed.
+        let old = r#"{"version":1,"name":"x","created":1,"hyprland":"h","apps":[
+            {"class":"kitty","command":"kitty","source":"cmdline","cwd":null,"terminal":true,"windows":[]}]}"#;
+        let s: Session = serde_json::from_str(old).unwrap();
+        assert!(s.scope.is_none() && s.apps[0].inner.is_none() && s.apps[0].process.is_none());
+    }
 }

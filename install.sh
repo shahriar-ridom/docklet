@@ -19,6 +19,17 @@ if [ ! -e "$CFG" ]; then
   echo "created $CFG"
 fi
 
+# What the sidebar calls out to. Missing required tools are an error; optional
+# ones only disable a feature.
+missing=
+for t in qs hyprctl python3 file; do command -v "$t" >/dev/null || missing="$missing $t"; done
+[ -z "$missing" ] || { echo "error: missing required tools:$missing" >&2; exit 1; }
+opt() { command -v "$1" >/dev/null || echo "note: $1 not found, $2"; }
+opt yt-dlp "the shelf can't download videos from links"
+opt ffmpeg "videos with separate audio won't be merged into one mp4"
+opt wl-copy "\"Copy link\" in the shelf menu won't work"
+opt gdbus "\"Show in folder\" falls back to opening the folder"
+
 if [ "${1:-}" != "--no-timer" ]; then
   install -Dm644 systemd/hyprsess-autosave.service "$UNITS/hyprsess-autosave.service"
   sed "s/@MINUTES@/$MIN/g" systemd/hyprsess-autosave.timer > "$UNITS/hyprsess-autosave.timer"

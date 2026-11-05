@@ -12,6 +12,18 @@ Singleton {
         Job {}
     }
 
+    property Component _streamComp: Component {
+        StreamJob {}
+    }
+
+    // Like run(), but `onLine(line)` fires for each stdout line as it comes.
+    // Returns the job; set `job.running = false` to cancel it.
+    function stream(argv, onLine, callback) {
+        const job = _streamComp.createObject(root, { command: argv, onLine: onLine || null, callback: callback || null });
+        job.running = true;
+        return job;
+    }
+
     function run(argv, callback) {
         const job = _jobComp.createObject(root, { command: argv, callback: callback || null });
         job.running = true;

@@ -87,16 +87,21 @@ PanelWindow {
             height: parent.height
         }
 
-        // Catches drags anywhere on the strip/panel; dropping outside the two
-        // zones defaults to "keep link".
+        // Catches drags anywhere on the strip/panel. It's where a drag first
+        // arrives, so it works out what's coming (files, a web image or link,
+        // text) for the shelf's drop zones. Dropping outside the zones does
+        // what the first zone does.
         DropArea {
             id: edgeDrop
             anchors.fill: parent
-            onEntered: drag => drag.accepted = drag.hasUrls
+            onEntered: drag => {
+                drag.accepted = ShelfStore.acceptsDrag(drag);
+                if (drag.accepted) ShelfStore.incoming = ShelfStore.inspect(drag);
+            }
             onDropped: drop => {
-                if (!drop.hasUrls) return;
-                drop.acceptProposedAction();
-                ShelfStore.addUrls(drop.urls, false);
+                if (!ShelfStore.acceptsDrag(drop)) return;
+                drop.accept(Qt.CopyAction);   // never "move": the source must keep its file
+                ShelfStore.handleDrop(drop, ShelfStore.zonesFor(ShelfStore.incoming || ShelfStore.inspect(drop))[0].role);
             }
         }
 
@@ -108,10 +113,10 @@ PanelWindow {
                       topMargin: Theme.edgeMargin; bottomMargin: Theme.edgeMargin }
             // Slide by animating the right margin: fully off-screen when hidden.
             anchors.rightMargin: win.shown ? Theme.edgeMargin : -width - 2
-            Behavior on anchors.rightMargin { NumberAnimation { duration: Theme.animMs; easing.type: Easing.OutCubic } }
+            Behavior on anchors.rightMargin { NumberAnimation { duration: Theme.animMs; easing.type: Theme.ease } }
 
             width: targetWidth
-            Behavior on width { NumberAnimation { duration: Theme.animMs; easing.type: Easing.OutCubic } }
+            Behavior on width { NumberAnimation { duration: Theme.animMs; easing.type: Theme.ease } }
 
             radius: Theme.radius
             color: Theme.bg
@@ -119,9 +124,17 @@ PanelWindow {
             border.width: 1
             clip: true
 
+            // Faint highlight along the top edge: light catching the glass.
+            Rectangle {
+                anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 1
+                          leftMargin: Theme.radius; rightMargin: Theme.radius }
+                height: 1
+                color: Theme.sheen
+            }
+
             ColumnLayout {
-                anchors { fill: parent; margins: Theme.padding }
-                spacing: Theme.padding
+                anchors { fill: parent; margins: Theme.padding; topMargin: Theme.padding + 4 }
+                spacing: 18
 
                 Shelf {
                     id: shelf
@@ -129,12 +142,6 @@ PanelWindow {
                     Layout.fillHeight: true
                     expanded: win.expanded
                     dragIncoming: win.dragIncoming
-                }
-
-                Rectangle {   // divider
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: Theme.border
                 }
 
                 SessionPanel {

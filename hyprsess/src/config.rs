@@ -22,6 +22,12 @@ pub struct Config {
     pub window_timeout_ms: u64,
     /// Classes treated as terminals (cwd taken from the shell child).
     pub terminals: Vec<String>,
+    /// Save the program running in a terminal (e.g. `claude`, `nvim`) and
+    /// relaunch it inside the terminal on restore.
+    pub terminal_programs: bool,
+    /// Programs never relaunched inside a terminal (regex, case-insensitive,
+    /// full match on the program name). Built in: sudo, doas, su, pkexec.
+    pub terminal_programs_ignore: Vec<String>,
     /// Extra ignore patterns (regex, case-insensitive, matched against the full class).
     pub ignore: Vec<String>,
     /// Per-class settings, keyed by window class (case-insensitive).
@@ -41,6 +47,9 @@ pub struct AppOverride {
     pub ignore: bool,
     /// Launch once per class even if windows had different PIDs.
     pub single_instance: bool,
+    /// Terminals only: args placed before the program to run inside it,
+    /// e.g. "-e" or "start --". Built in for common terminals.
+    pub exec_args: Option<String>,
 }
 
 impl Default for Config {
@@ -54,6 +63,8 @@ impl Default for Config {
             terminals: ["kitty", "foot", "footclient", "alacritty", "org.wezfurlong.wezterm", "wezterm", "ghostty", "com.mitchellh.ghostty"]
                 .map(String::from)
                 .to_vec(),
+            terminal_programs: true,
+            terminal_programs_ignore: Vec::new(),
             ignore: Vec::new(),
             apps: HashMap::new(),
         }
@@ -74,6 +85,17 @@ const BUILTIN_IGNORE: &[&str] = &[
     "fcitx.*",
 ];
 
+const BUILTIN_PROGRAM_IGNORE: &[&str] = &["sudo", "doas", "su", "pkexec", "run0"];
+
+/// How each known terminal takes a command to run. kitty/foot take it bare.
+fn builtin_exec_args(class: &str) -> &'static str {
+    match class.to_lowercase().as_str() {
+        "kitty" | "foot" | "footclient" => "",
+        "org.wezfurlong.wezterm" | "wezterm" => "start --",
+        _ => "-e", // alacritty, ghostty, xterm, konsole, gnome-terminal (-- also works)…
+    }
+}
+
 pub fn config_path() -> PathBuf {
     let base = std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -84,6 +106,7 @@ pub fn config_path() -> PathBuf {
 pub struct Loaded {
     pub cfg: Config,
     ignore: Vec<Regex>,
+    program_ignore: Vec<Regex>,
     apps_lc: HashMap<String, AppOverride>,
 }
 
@@ -96,14 +119,30 @@ impl Loaded {
         } else {
             Config::default()
         };
+        Self::from_config(cfg)
+    }
+
+    /// Built-in defaults, ignoring the user's config file (tests).
+    #[cfg(test)]
+    pub fn load_default() -> Self {
+        Self::from_config(Config::default()).expect("default config is valid")
+    }
+
+    fn from_config(cfg: Config) -> Result<Self> {
         let ignore = BUILTIN_IGNORE
             .iter()
             .map(|s| s.to_string())
             .chain(cfg.ignore.iter().cloned())
             .map(|p| Regex::new(&format!("(?i)^(?:{p})$")).with_context(|| format!("bad ignore regex: {p}")))
             .collect::<Result<Vec<_>>>()?;
+        let program_ignore = BUILTIN_PROGRAM_IGNORE
+            .iter()
+            .map(|s| s.to_string())
+            .chain(cfg.terminal_programs_ignore.iter().cloned())
+            .map(|p| Regex::new(&format!("(?i)^(?:{p})$")).with_context(|| format!("bad terminal_programs_ignore regex: {p}")))
+            .collect::<Result<Vec<_>>>()?;
         let apps_lc = cfg.apps.iter().map(|(k, v)| (k.to_lowercase(), v.clone())).collect();
-        Ok(Self { cfg, ignore, apps_lc })
+        Ok(Self { cfg, ignore, program_ignore, apps_lc })
     }
 
     pub fn app(&self, class: &str) -> Option<&AppOverride> {
@@ -116,6 +155,14 @@ impl Loaded {
 
     pub fn is_terminal(&self, class: &str) -> bool {
         self.cfg.terminals.iter().any(|t| t.eq_ignore_ascii_case(class))
+    }
+
+    pub fn is_program_ignored(&self, name: &str) -> bool {
+        self.program_ignore.iter().any(|r| r.is_match(name))
+    }
+
+    pub fn exec_args_for(&self, class: &str) -> String {
+        self.app(class).and_then(|a| a.exec_args.clone()).unwrap_or_else(|| builtin_exec_args(class).to_string())
     }
 
     pub fn window_timeout_for(&self, class: &str) -> u64 {
