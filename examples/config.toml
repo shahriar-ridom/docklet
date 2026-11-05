@@ -1,0 +1,51 @@
+# ~/.config/hyprsess/config.toml — every key is optional.
+
+# Pause between app launches (ms). Raise it if apps fight over focus/placement.
+launch_delay_ms = 400
+
+# After launching, poll `hyprctl clients` and correct workspace / float /
+# size / position for windows that ignored the exec rules.
+fixup = true
+fixup_timeout_ms = 20000
+
+# Classes treated as terminals: the saved cwd is the shell's, not the terminal's.
+# terminals = ["kitty", "foot", "footclient", "alacritty", "org.wezfurlong.wezterm", "ghostty"]
+
+# Extra classes never to save (regex, case-insensitive, full match).
+# Built in already: quickshell, noctalia*, portals, polkit agents, fcitx.
+ignore = [
+  # "pavucontrol",
+  # "org\\.gnome\\.Calculator",
+]
+
+# Per-class overrides. Key = window class as shown by `hyprctl clients`.
+# Applied on save AND on restore, so fixing a command here repairs old snapshots.
+
+# [apps.zen]
+# command = "zen-browser"      # use the launcher instead of the raw binary
+# delay_ms = 2000              # browsers take a while; give them room
+# single_instance = true       # launch once even if windows had different PIDs
+
+# [apps."com.anthropic.Claude"]
+# delay_ms = 1500
+
+# Electron wrapper whose cmdline is an internal helper:
+# [apps.discord]
+# command = "discord"
+
+# Flatpak (auto-detected, but you can pin the exact command):
+# [apps."org.telegram.desktop"]
+# command = "flatpak run org.telegram.desktop"
+
+# AppImage (auto-detected via $APPIMAGE or its .desktop file; pin if wrong):
+# [apps.neo]
+# command = "~/.local/opt/appdrop/neo-e5527d7173fac610.AppImage"
+
+# Steam games (steam_app_<id> is auto-mapped to steam://rungameid/<id>):
+# [apps.steam]
+# command = "steam -silent"
+# delay_ms = 5000
+
+# Never save this one:
+# [apps.thunar]
+# ignore = true

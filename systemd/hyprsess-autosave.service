@@ -1,0 +1,8 @@
+[Unit]
+Description=Save Hyprland session snapshot (hyprsess autosave)
+# Only meaningful while Hyprland runs; hyprsess finds the instance socket itself.
+ConditionPathExistsGlob=%t/hypr/*/.socket.sock
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hyprsess save autosave

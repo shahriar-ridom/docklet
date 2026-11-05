@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Hyprland session autosave
+
+[Timer]
+# First save @MINUTES@ min after the timer starts (after login), then every @MINUTES@ min.
+# Change later with: systemctl --user edit hyprsess-autosave.timer
+OnActiveSec=@MINUTES@min
+OnUnitActiveSec=@MINUTES@min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
