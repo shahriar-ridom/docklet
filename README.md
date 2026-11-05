@@ -1,4 +1,4 @@
-# sessionbar
+# Docklet
 
 Hyprland (0.56+, Lua config) session manager + Quickshell sidebar with a file shelf.
 
@@ -63,9 +63,9 @@ hyprsess restarts **programs**; it can't restore what's inside them:
 ## Sidebar (Quickshell)
 
 ```sh
-ln -sfn "$PWD/quickshell" ~/.config/quickshell/sessionbar
-qs -c sessionbar                  # foreground with logs; Ctrl+C to quit
-SESSIONBAR_PIN=1 qs -c sessionbar # keep it open and wide while restyling
+ln -sfn "$PWD/quickshell" ~/.config/quickshell/docklet
+qs -c docklet                  # foreground with logs; Ctrl+C to quit
+DOCKLET_PIN=1 qs -c docklet # keep it open and wide while restyling
 ```
 Quickshell hot-reloads on save. Edit `quickshell/Theme.qml` to restyle (colors, sizes, timings).
 
@@ -75,7 +75,7 @@ Quickshell hot-reloads on save. Edit `quickshell/Theme.qml` to restyle (colors, 
 | `Sidebar.qml` | Layer-shell `PanelWindow`, auto-hide and expand logic, input mask |
 | `Theme.qml` | Every color, size and timing |
 | `Jobs.qml` / `Job.qml` | Run external commands with a callback |
-| `shelf/ShelfStore.qml` | Shelf state and persistence (`~/.local/share/sessionbar/shelf.json`) |
+| `shelf/ShelfStore.qml` | Shelf state and persistence (`~/.local/share/docklet/shelf.json`) |
 | `shelf/Shelf.qml`, `shelf/ShelfItem.qml` | Shelf UI, drop zones, drag-out |
 | `shelf/fetch.py` | Web helper: page title + favicon, downloads, videos via `yt-dlp` |
 | `session/Hyprsess.qml` | Runs `hyprsess --json …`, holds the session list |

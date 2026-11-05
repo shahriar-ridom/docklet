@@ -15,7 +15,7 @@ Singleton {
     id: root
 
     readonly property string home: Quickshell.env("HOME")
-    readonly property string dataDir: home + "/.local/share/sessionbar"
+    readonly property string dataDir: home + "/.local/share/docklet"
     readonly property string dataFile: dataDir + "/shelf.json"
     readonly property string copyDir: home + "/.cache/shelf"
     readonly property string fetcher: Quickshell.shellDir + "/shelf/fetch.py"

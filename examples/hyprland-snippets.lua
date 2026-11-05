@@ -24,12 +24,12 @@ hl.bind(Mod .. " + SHIFT + Escape", hl.dsp.exec_cmd("hyprsess-power logout"))
 -- =============================================================================
 
 -- --- startup.lua: launch the sidebar (inside hl.on("hyprland.start", ...)) ----
--- hl.exec_cmd("qs -c sessionbar")
+-- hl.exec_cmd("qs -c docklet")
 
 -- --- rules.lua: blur behind the translucent panel -----------------------------
 hl.layer_rule({
-	name = "sessionbar",
-	match = { namespace = "^sessionbar$" },
+	name = "docklet",
+	match = { namespace = "^docklet$" },
 	blur = true,
 	ignore_alpha = 0.2,   -- don't blur the fully transparent parts of the surface
 })

@@ -21,7 +21,7 @@ PanelWindow {
     exclusiveZone: 0                   // overlay windows, don't push them aside
     color: "transparent"
 
-    WlrLayershell.namespace: "sessionbar"   // for Hyprland layer rules (blur)
+    WlrLayershell.namespace: "docklet"   // for Hyprland layer rules (blur)
     WlrLayershell.layer: WlrLayer.Top
     // Keyboard only while typing a session name; otherwise never steal focus.
     // Exclusive = typing works immediately, no extra click into the field.
@@ -33,8 +33,8 @@ PanelWindow {
     // ---- state machine -----------------------------------------------------
     readonly property bool dragIncoming: edgeDrop.containsDrag || shelf.dropHover
     readonly property bool wantShown: hover.hovered || dragIncoming || ShelfStore.draggingOut || shelf.menuOpen
-    // SESSIONBAR_PIN=1 keeps the bar open and wide (handy while restyling).
-    readonly property bool pinned: Quickshell.env("SESSIONBAR_PIN") === "1"
+    // DOCKLET_PIN=1 keeps the bar open and wide (handy while restyling).
+    readonly property bool pinned: Quickshell.env("DOCKLET_PIN") === "1"
     property bool shown: pinned
     property bool expanded: pinned
 
